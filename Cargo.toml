@@ -1,0 +1,11 @@
+[package]
+name = "rematchash"
+version = "0.1.0"
+edition = "2021"
+description = "Rematchash is a tool to delete files based on a given md5 hash. Intended to delete duplicates."
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+clap = { version = "4.1.13", features = ["derive"] }
+md5 = "0.7.0"
