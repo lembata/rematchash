@@ -1,5 +1,6 @@
 use clap::Parser;
 use md5;
+use sha1::{Sha1, Digest};
 use std::fs;
 use std::io::Write;
 use std::path::Path;
@@ -97,8 +98,7 @@ fn scan_directory(path: &PathBuf, cli: &Cli, handled_paths: &mut Vec<PathBuf>) -
                 count += scan_directory(&entry.path(), cli, handled_paths);
             }
         } else {
-            let hash = md5::compute(fs::read(&entry.path()).unwrap());
-            let hash = format!("{:x}", hash);
+            let hash = get_hash(&entry.path());
 
             if cli.verbose {
                 println!("{}: {}", entry.path().display(), hash);
@@ -126,6 +126,26 @@ fn scan_directory(path: &PathBuf, cli: &Cli, handled_paths: &mut Vec<PathBuf>) -
     });
 
     count
+}
+
+fn equate_hash(original: &String, path: &PathBuf) -> bool {
+    let hash_md5 = get_hash_md5(path);
+    let hash_sha1 = get_hash_sha1(path);
+
+    original == &hash_md5 || original == &hash_sha1
+}
+
+fn get_hash_md5(path: &PathBuf) -> String {
+    let hash = md5::compute(fs::read(path).unwrap());
+    format!("{:x}", hash)
+}
+
+fn get_hash_sha1(path: &PathBuf) -> String {
+    let mut sh = Sha1::default();
+    sh.update(fs::read(path).unwrap());
+
+    let hash = sh.finalize();
+    format!("{:x}", hash)
 }
 
 fn confirmation_promt(path: &PathBuf) -> bool {

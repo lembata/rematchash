@@ -9,3 +9,4 @@ description = "Rematchash is a tool to delete files based on a given md5 hash. I
 [dependencies]
 clap = { version = "4.1.13", features = ["derive"] }
 md5 = "0.7.0"
+sha1 = "0.10.5"
