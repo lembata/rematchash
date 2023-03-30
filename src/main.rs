@@ -1,37 +1,20 @@
 use clap::Parser;
 use md5;
 use sha1::{Sha1, Digest};
+use sha2::Sha256;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
+use crate::cli::Cli;
 
-///Simple tool to delete files based on a hash
-#[derive(Parser)]
-#[command(author, version, about, long_about)]
-struct Cli {
-    ///The directory to search in
-    path: std::path::PathBuf,
+mod cli;
 
-    ///The hash to search for
-    #[arg(short = 'H', long)]
-    hash: String,
-
-    ///Ignore symlinks
-    #[arg(short = 's', long, default_value = "false")]
-    ignore_symlinks: bool,
-
-    ///Scan subdirectories
-    #[arg(short, long, default_value = "false")]
-    recursive: bool,
-
-    ///Ask for confirmation before deleting for each file
-    #[arg(short, long, default_value = "false")]
-    interactive: bool,
-
-    ///Output more information
-    #[arg(short, long, default_value = "false")]
-    verbose: bool,
+#[derive(Debug)]
+enum HashType {
+    MD5,
+    SHA1,
+    SHA256
 }
 
 fn main() {
@@ -42,17 +25,25 @@ fn main() {
         return;
     }
 
-    if !is_valid_hash(&args.hash) {
+    let hash_type = validate_hash(&args.hash);
+
+    if args.verbose {
+        println!("Hash type: {:?}", hash_type);
+    }
+
+    if hash_type.is_none() {
         println!("Invalid hash: {}", &args.hash);
         return;
     }
 
+    let hash_type = hash_type.unwrap();
+
     let mut handled_paths: Vec<PathBuf> = Vec::new();
-    let affected_files = scan_directory(&args.path, &args, &mut handled_paths);
+    let affected_files = scan_directory(&args.path, &args, &hash_type, &mut handled_paths);
     println!("Deleted {} file(s)", affected_files);
 }
 
-fn scan_directory(path: &PathBuf, cli: &Cli, handled_paths: &mut Vec<PathBuf>) -> i32 {
+fn scan_directory(path: &PathBuf, cli: &Cli, hash_type: &HashType, handled_paths: &mut Vec<PathBuf>) -> i32 {
     let mut count = 0;
 
     if cli.verbose {
@@ -74,14 +65,7 @@ fn scan_directory(path: &PathBuf, cli: &Cli, handled_paths: &mut Vec<PathBuf>) -
             }
         }
 
-        let entry_path = if entry_path.is_symlink() {
-            if cli.verbose {
-                println!("Resolving symlink: {} -> {}", entry_path.display(), entry_path.read_link().unwrap().display());
-            }
-            fs::read_link(entry_path).unwrap()
-        } else {
-            entry_path
-        };
+        let entry_path = expand_symlink(entry_path, cli.verbose);
 
         if handled_paths.contains(&entry_path) {
             if cli.verbose {
@@ -95,10 +79,10 @@ fn scan_directory(path: &PathBuf, cli: &Cli, handled_paths: &mut Vec<PathBuf>) -
         if entry_path.is_dir() {
 
             if cli.recursive {
-                count += scan_directory(&entry.path(), cli, handled_paths);
+                count += scan_directory(&entry.path(), cli, hash_type, handled_paths);
             }
         } else {
-            let hash = get_hash(&entry.path());
+            let hash = get_hash(&entry.path(), hash_type);
 
             if cli.verbose {
                 println!("{}: {}", entry.path().display(), hash);
@@ -128,11 +112,12 @@ fn scan_directory(path: &PathBuf, cli: &Cli, handled_paths: &mut Vec<PathBuf>) -
     count
 }
 
-fn equate_hash(original: &String, path: &PathBuf) -> bool {
-    let hash_md5 = get_hash_md5(path);
-    let hash_sha1 = get_hash_sha1(path);
-
-    original == &hash_md5 || original == &hash_sha1
+fn get_hash(path: &PathBuf, hash_type: &HashType) -> String {
+    match hash_type {
+        HashType::MD5 => get_hash_md5(path),
+        HashType::SHA1 => get_hash_sha1(path),
+        HashType::SHA256 => get_hash_sha2(path)
+    }
 }
 
 fn get_hash_md5(path: &PathBuf) -> String {
@@ -142,6 +127,14 @@ fn get_hash_md5(path: &PathBuf) -> String {
 
 fn get_hash_sha1(path: &PathBuf) -> String {
     let mut sh = Sha1::default();
+    sh.update(fs::read(path).unwrap());
+
+    let hash = sh.finalize();
+    format!("{:x}", hash)
+}
+
+fn get_hash_sha2(path: &PathBuf) -> String {
+    let mut sh = Sha256::default();
     sh.update(fs::read(path).unwrap());
 
     let hash = sh.finalize();
@@ -158,8 +151,44 @@ fn confirmation_promt(path: &PathBuf) -> bool {
     input.trim().to_lowercase() == "y"
 }
 
-fn is_valid_hash(hash: &String) -> bool {
+fn validate_hash(hash: &String) -> Option<HashType> {
+    if is_valid_hash_md5(hash) {
+        return Some(HashType::MD5);
+    }
+
+    if is_valid_hash_sha1(hash) {
+        return Some(HashType::SHA1);
+    }
+
+    if is_valid_hash_sha2(hash) {
+        return Some(HashType::SHA256);
+    }
+
+    None
+}
+
+fn is_valid_hash_md5(hash: &String) -> bool {
     hash.len() == 32
         && hash.chars().all(|c| c.is_digit(16))
 }
 
+fn is_valid_hash_sha1(hash: &String) -> bool {
+    hash.len() == 40
+        && hash.chars().all(|c| c.is_digit(16))
+}
+
+fn is_valid_hash_sha2(hash: &String) -> bool {
+    hash.len() == 64
+        && hash.chars().all(|c| c.is_digit(16))
+}
+
+fn expand_symlink(entry_path :PathBuf, verbose :bool) -> PathBuf {
+    if entry_path.is_symlink() {
+        if verbose {
+            println!("Resolving symlink: {} -> {}", entry_path.display(), entry_path.read_link().unwrap().display());
+        }
+        return fs::read_link(entry_path).unwrap()
+    } else {
+        return entry_path
+    };
+}
